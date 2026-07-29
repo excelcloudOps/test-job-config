@@ -1,0 +1,65 @@
+name: Build and Publish to Nexus
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional Maven version override (e.g. 1.0.0 or 1.0.1-SNAPSHOT)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    env:
+      NEXUS_URL: ${{ secrets.NEXUS_URL }}
+      NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+      NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+      NEXUS_RELEASES_REPO: ${{ vars.NEXUS_RELEASES_REPO || 'maven-releases' }}
+      NEXUS_SNAPSHOTS_REPO: ${{ vars.NEXUS_SNAPSHOTS_REPO || 'maven-snapshots' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          server-id: nexus
+          server-username: NEXUS_USERNAME
+          server-password: NEXUS_PASSWORD
+
+      - name: Normalize Nexus URL
+        run: echo "NEXUS_URL=${NEXUS_URL%/}" >> "$GITHUB_ENV"
+
+      - name: Override version
+        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+        run: >
+          mvn -B -ntp org.codehaus.mojo:versions-maven-plugin:2.18.0:set
+          -DnewVersion="${{ inputs.version }}"
+          -DgenerateBackupPoms=false
+
+      - name: Build and test
+        run: |
+          mvn -B -ntp clean verify \
+            -Dnexus.url="${NEXUS_URL}" \
+            -Dnexus.releases.repo="${NEXUS_RELEASES_REPO}" \
+            -Dnexus.snapshots.repo="${NEXUS_SNAPSHOTS_REPO}"
+
+      - name: Publish to Nexus
+        if: github.event_name != 'pull_request'
+        run: |
+          mvn -B -ntp deploy -DskipTests \
+            -Dnexus.url="${NEXUS_URL}" \
+            -Dnexus.releases.repo="${NEXUS_RELEASES_REPO}" \
+            -Dnexus.snapshots.repo="${NEXUS_SNAPSHOTS_REPO}"
