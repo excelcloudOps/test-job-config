@@ -5,7 +5,7 @@ Demo project that builds a Maven library and publishes the JAR to a Nexus **raw*
 ## What it does
 
 - Builds and tests `com.excelcloud.demo:sample-lib`
-- On pushes to `main` (and manual runs), uploads the JAR to Nexus `raw-release`
+- On pushes to `main` (and manual runs), uploads the JAR to Nexus `raw-releases`
 - Pull requests build and test only (no publish)
 
 ## Required GitHub Actions secrets
@@ -22,7 +22,7 @@ Already configured on this repo:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `NEXUS_RAW_REPO` | `raw-release` | Hosted raw repository name |
+| `NEXUS_RAW_REPO` | `raw-releases` | Hosted raw repository name |
 
 Grant the deploy user write access to that raw hosted repo.
 
@@ -37,7 +37,7 @@ mvn -B clean verify
 Artifacts are uploaded via the Nexus Components API to:
 
 ```text
-{NEXUS_URL}/repository/raw-release/com/excelcloud/demo/sample-lib/{version}/sample-lib-{version}.jar
+{NEXUS_URL}/repository/raw-releases/com/excelcloud/demo/sample-lib/{version}/sample-lib-{version}.jar
 ```
 
 ## Workflow
@@ -52,12 +52,12 @@ Artifacts are uploaded via the Nexus Components API to:
 - Group: `com.excelcloud.demo`
 - Artifact: `sample-lib`
 - Default version: `1.0.0`
-- Nexus repo: `raw-release`
+- Nexus repo: `raw-releases`
 
 ## Troubleshooting
 
 ### `403 Forbidden` on upload
 
-1. Confirm `raw-release` exists as a **hosted raw** repository
+1. Confirm `raw-releases` exists as a **hosted raw** repository
 2. Give `NEXUS_USERNAME` write privileges on that repo
 3. Keep `NEXUS_URL` as the Nexus base URL only (no `/repository/...` suffix)

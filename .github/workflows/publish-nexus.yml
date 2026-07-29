@@ -22,7 +22,7 @@ jobs:
       NEXUS_URL: ${{ secrets.NEXUS_URL }}
       NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
       NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
-      NEXUS_RAW_REPO: ${{ vars.NEXUS_RAW_REPO || 'raw-release' }}
+      NEXUS_RAW_REPO: ${{ vars.NEXUS_RAW_REPO || 'raw-releases' }}
 
     steps:
       - name: Checkout
@@ -38,7 +38,7 @@ jobs:
       - name: Normalize Nexus URL
         run: echo "NEXUS_URL=${NEXUS_URL%/}" >> "$GITHUB_ENV"
 
-      - name: Verify Nexus credentials and raw-release repo
+      - name: Verify Nexus credentials and raw-releases repo
         if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
@@ -94,7 +94,7 @@ jobs:
       - name: Build and test
         run: mvn -B -ntp clean verify
 
-      - name: Publish JAR to Nexus raw-release
+      - name: Publish JAR to Nexus raw-releases
         if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
