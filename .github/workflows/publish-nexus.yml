@@ -42,6 +42,69 @@ jobs:
       - name: Normalize Nexus URL
         run: echo "NEXUS_URL=${NEXUS_URL%/}" >> "$GITHUB_ENV"
 
+      - name: Verify Nexus credentials and target repos
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          if [ -z "${NEXUS_URL}" ] || [ -z "${NEXUS_USERNAME}" ] || [ -z "${NEXUS_PASSWORD}" ]; then
+            echo "::error::NEXUS_URL, NEXUS_USERNAME, and NEXUS_PASSWORD secrets must be set"
+            exit 1
+          fi
+
+          echo "Checking Nexus status at ${NEXUS_URL}"
+          status_code=$(curl -sS -o /tmp/nexus-status.json -w "%{http_code}" \
+            -u "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+            "${NEXUS_URL}/service/rest/v1/status" || true)
+          echo "Status endpoint HTTP ${status_code}"
+          if [ "${status_code}" != "200" ]; then
+            echo "::error::Nexus status check failed (HTTP ${status_code}). Check NEXUS_URL and credentials."
+            cat /tmp/nexus-status.json || true
+            exit 1
+          fi
+
+          curl -sS -u "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+            "${NEXUS_URL}/service/rest/v1/repositories" \
+            -o /tmp/nexus-repos.json
+
+          echo "Maven hosted repositories visible to this user:"
+          python3 - <<'PY'
+          import json, os, sys
+          repos = json.load(open("/tmp/nexus-repos.json"))
+          maven_hosted = [
+              r for r in repos
+              if r.get("format") == "maven2" and r.get("type") == "hosted"
+          ]
+          for r in sorted(maven_hosted, key=lambda x: x["name"]):
+              print(f"  - {r['name']} ({r.get('url', '')})")
+
+          snapshots = os.environ["NEXUS_SNAPSHOTS_REPO"]
+          releases = os.environ["NEXUS_RELEASES_REPO"]
+          names = {r["name"] for r in maven_hosted}
+          missing = [n for n in (snapshots, releases) if n not in names]
+          if missing:
+              print(
+                  "::error::Configured repo(s) not found as maven2 hosted: "
+                  + ", ".join(missing)
+                  + ". Create them in Nexus or set NEXUS_SNAPSHOTS_REPO / NEXUS_RELEASES_REPO variables."
+              )
+              sys.exit(1)
+
+          # Probe write access with a lightweight PUT against the snapshots path.
+          # 401/403 => authz problem; 400/404 on missing path can still mean reachable auth.
+          print(f"Target snapshots repo OK: {snapshots}")
+          print(f"Target releases repo OK: {releases}")
+          PY
+
+          probe_url="${NEXUS_URL}/repository/${NEXUS_SNAPSHOTS_REPO}/com/excelcloud/demo/sample-lib/maven-metadata.xml"
+          probe_code=$(curl -sS -o /tmp/nexus-probe.out -w "%{http_code}" \
+            -u "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+            -X GET "${probe_url}" || true)
+          echo "Snapshots repo probe HTTP ${probe_code} (${probe_url})"
+          if [ "${probe_code}" = "401" ] || [ "${probe_code}" = "403" ]; then
+            echo "::error::Nexus returned ${probe_code} for ${NEXUS_SNAPSHOTS_REPO}. Grant the deploy user nx-repository-view-*-*-* and write privileges on that hosted repo."
+            exit 1
+          fi
+
       - name: Override version
         if: github.event_name == 'workflow_dispatch' && inputs.version != ''
         run: >
@@ -59,7 +122,7 @@ jobs:
       - name: Publish to Nexus
         if: github.event_name != 'pull_request'
         run: |
-          mvn -B -ntp deploy -DskipTests \
+          mvn -B -ntp deploy -DskipTests -e \
             -Dnexus.url="${NEXUS_URL}" \
             -Dnexus.releases.repo="${NEXUS_RELEASES_REPO}" \
             -Dnexus.snapshots.repo="${NEXUS_SNAPSHOTS_REPO}"

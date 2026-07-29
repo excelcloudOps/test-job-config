@@ -55,3 +55,14 @@ mvn -B deploy
 - Group: `com.excelcloud.demo`
 - Artifact: `sample-lib`
 - Default version: `1.0.0-SNAPSHOT` → published to the snapshots repo
+
+## Troubleshooting
+
+### `status code: 403 Forbidden` on deploy
+
+The workflow reached Nexus, but the deploy user cannot write to the target repo. Check:
+
+1. `maven-snapshots` / `maven-releases` exist as **hosted** Maven 2 repositories (not group/proxy)
+2. `NEXUS_USERNAME` has write privileges on those repos (Nexus → Security → Privileges / Roles)
+3. Repo variable names match your actual Nexus repo names if they differ from the defaults
+4. `NEXUS_URL` is the Nexus base URL only (e.g. `https://nexus.example.com`), not a `/repository/...` path
