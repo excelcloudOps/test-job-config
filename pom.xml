@@ -6,32 +6,16 @@
 
   <groupId>com.excelcloud.demo</groupId>
   <artifactId>sample-lib</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
+  <version>1.0.0</version>
   <packaging>jar</packaging>
 
   <name>sample-lib</name>
-  <description>Sample library published to Nexus via GitHub Actions</description>
+  <description>Sample library published to Nexus raw-release via GitHub Actions</description>
 
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <nexus.url>${env.NEXUS_URL}</nexus.url>
-    <nexus.releases.repo>maven-releases</nexus.releases.repo>
-    <nexus.snapshots.repo>maven-snapshots</nexus.snapshots.repo>
   </properties>
-
-  <distributionManagement>
-    <repository>
-      <id>nexus</id>
-      <name>Nexus Releases</name>
-      <url>${nexus.url}/repository/${nexus.releases.repo}/</url>
-    </repository>
-    <snapshotRepository>
-      <id>nexus</id>
-      <name>Nexus Snapshots</name>
-      <url>${nexus.url}/repository/${nexus.snapshots.repo}/</url>
-    </snapshotRepository>
-  </distributionManagement>
 
   <dependencies>
     <dependency>
@@ -58,11 +42,6 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-jar-plugin</artifactId>
         <version>3.4.2</version>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-deploy-plugin</artifactId>
-        <version>3.1.3</version>
       </plugin>
     </plugins>
   </build>
