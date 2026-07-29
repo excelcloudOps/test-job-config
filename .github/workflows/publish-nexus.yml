@@ -150,9 +150,10 @@ jobs:
       - name: Post success message to Slack
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          NEXUS_URL: ${{ secrets.NEXUS_URL }}
+          NEXUS_RAW_REPO: ${{ vars.NEXUS_RAW_REPO || 'raw-releases' }}
           ARTIFACT_ID: ${{ needs.build-and-publish.outputs.artifact_id }}
           VERSION: ${{ needs.build-and-publish.outputs.version }}
-          ARTIFACT_URL: ${{ needs.build-and-publish.outputs.artifact_url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REPO: ${{ github.repository }}
           ACTOR: ${{ github.actor }}
@@ -164,9 +165,14 @@ jobs:
             exit 1
           fi
 
+          NEXUS_URL="${NEXUS_URL%/}"
+          GROUP_PATH="com/excelcloud/demo"
+          ARTIFACT_URL="${NEXUS_URL}/repository/${NEXUS_RAW_REPO}/${GROUP_PATH}/${ARTIFACT_ID}/${VERSION}/${ARTIFACT_ID}-${VERSION}.jar"
+
           # Slack Workflow webhook triggers expect JSON keys that match the
-          # workflow's configured input variables.
-          payload=$(python3 - <<'PY'
+          # workflow's configured input variables. Rebuild artifact URL here
+          # because job outputs that embed secrets.NEXUS_URL are masked by GHA.
+          payload=$(ARTIFACT_URL="${ARTIFACT_URL}" python3 - <<'PY'
           import json, os
           message = (
               f"Nexus publish succeeded for {os.environ['ARTIFACT_ID']}:{os.environ['VERSION']}\n"
@@ -199,6 +205,10 @@ jobs:
             echo
           fi
           if [ "${http_code}" != "200" ]; then
-            echo "::error::Slack notification failed (HTTP ${http_code})"
+            if grep -q 'workflow_not_published' /tmp/slack-response.txt 2>/dev/null; then
+              echo "::error::Slack workflow is not published. Open Slack Workflow Builder and click Publish."
+            else
+              echo "::error::Slack notification failed (HTTP ${http_code})"
+            fi
             exit 1
           fi

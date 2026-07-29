@@ -70,5 +70,5 @@ Artifacts are uploaded via the Nexus Components API to:
 ### Slack notification skipped or failed
 
 1. Confirm repo secret `SLACK_WEBHOOK_URL` is set to your Slack **Workflow webhook** URL (`hooks.slack.com/triggers/...`)
-2. In the Slack workflow, ensure there is an input variable named `message`
+2. In Slack Workflow Builder, add an input variable named `message`, then **Publish** the workflow (unpublished workflows return `workflow_not_published`)
 3. Confirm the workflow posts that `message` to your channel
