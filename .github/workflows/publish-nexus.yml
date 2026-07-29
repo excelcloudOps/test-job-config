@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Optional Maven version override (e.g. 1.0.0 or 1.0.1-SNAPSHOT)"
+        description: "Optional Maven version override (e.g. 1.0.0)"
         required: false
         type: string
 
@@ -22,8 +22,7 @@ jobs:
       NEXUS_URL: ${{ secrets.NEXUS_URL }}
       NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
       NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
-      NEXUS_RELEASES_REPO: ${{ vars.NEXUS_RELEASES_REPO || 'maven-releases' }}
-      NEXUS_SNAPSHOTS_REPO: ${{ vars.NEXUS_SNAPSHOTS_REPO || 'maven-snapshots' }}
+      NEXUS_RAW_REPO: ${{ vars.NEXUS_RAW_REPO || 'raw-release' }}
 
     steps:
       - name: Checkout
@@ -35,12 +34,55 @@ jobs:
           distribution: temurin
           java-version: "17"
           cache: maven
-          server-id: nexus
-          server-username: NEXUS_USERNAME
-          server-password: NEXUS_PASSWORD
 
       - name: Normalize Nexus URL
         run: echo "NEXUS_URL=${NEXUS_URL%/}" >> "$GITHUB_ENV"
+
+      - name: Verify Nexus credentials and raw-release repo
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          if [ -z "${NEXUS_URL}" ] || [ -z "${NEXUS_USERNAME}" ] || [ -z "${NEXUS_PASSWORD}" ]; then
+            echo "::error::NEXUS_URL, NEXUS_USERNAME, and NEXUS_PASSWORD secrets must be set"
+            exit 1
+          fi
+
+          echo "Checking Nexus status at ${NEXUS_URL}"
+          status_code=$(curl -sS -o /tmp/nexus-status.json -w "%{http_code}" \
+            -u "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+            "${NEXUS_URL}/service/rest/v1/status" || true)
+          echo "Status endpoint HTTP ${status_code}"
+          if [ "${status_code}" != "200" ]; then
+            echo "::error::Nexus status check failed (HTTP ${status_code}). Check NEXUS_URL and credentials."
+            cat /tmp/nexus-status.json || true
+            exit 1
+          fi
+
+          curl -sS -u "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+            "${NEXUS_URL}/service/rest/v1/repositories" \
+            -o /tmp/nexus-repos.json
+
+          echo "Raw hosted repositories visible to this user:"
+          python3 - <<'PY'
+          import json, os, sys
+          repos = json.load(open("/tmp/nexus-repos.json"))
+          raw_hosted = [
+              r for r in repos
+              if r.get("format") == "raw" and r.get("type") == "hosted"
+          ]
+          for r in sorted(raw_hosted, key=lambda x: x["name"]):
+              print(f"  - {r['name']} ({r.get('url', '')})")
+
+          target = os.environ["NEXUS_RAW_REPO"]
+          names = {r["name"] for r in raw_hosted}
+          if target not in names:
+              print(
+                  f"::error::Configured repo '{target}' not found as raw hosted. "
+                  "Create it in Nexus or set NEXUS_RAW_REPO."
+              )
+              sys.exit(1)
+          print(f"Target raw repo OK: {target}")
+          PY
 
       - name: Override version
         if: github.event_name == 'workflow_dispatch' && inputs.version != ''
@@ -50,16 +92,40 @@ jobs:
           -DgenerateBackupPoms=false
 
       - name: Build and test
-        run: |
-          mvn -B -ntp clean verify \
-            -Dnexus.url="${NEXUS_URL}" \
-            -Dnexus.releases.repo="${NEXUS_RELEASES_REPO}" \
-            -Dnexus.snapshots.repo="${NEXUS_SNAPSHOTS_REPO}"
+        run: mvn -B -ntp clean verify
 
-      - name: Publish to Nexus
+      - name: Publish JAR to Nexus raw-release
         if: github.event_name != 'pull_request'
         run: |
-          mvn -B -ntp deploy -DskipTests \
-            -Dnexus.url="${NEXUS_URL}" \
-            -Dnexus.releases.repo="${NEXUS_RELEASES_REPO}" \
-            -Dnexus.snapshots.repo="${NEXUS_SNAPSHOTS_REPO}"
+          set -euo pipefail
+          VERSION=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)
+          ARTIFACT_ID=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.artifactId)
+          GROUP_PATH=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.groupId | tr '.' '/')
+          JAR="target/${ARTIFACT_ID}-${VERSION}.jar"
+          DIRECTORY="/${GROUP_PATH}/${ARTIFACT_ID}/${VERSION}"
+
+          if [ ! -f "${JAR}" ]; then
+            echo "::error::Built JAR not found at ${JAR}"
+            exit 1
+          fi
+
+          echo "Uploading ${JAR} to ${NEXUS_RAW_REPO}${DIRECTORY}/"
+          http_code=$(curl -sS -o /tmp/nexus-upload.out -w "%{http_code}" \
+            -u "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+            -X POST "${NEXUS_URL}/service/rest/v1/components?repository=${NEXUS_RAW_REPO}" \
+            -F "raw.directory=${DIRECTORY}" \
+            -F "raw.asset1=@${JAR}" \
+            -F "raw.asset1.filename=$(basename "${JAR}")")
+
+          echo "Upload HTTP ${http_code}"
+          if [ -s /tmp/nexus-upload.out ]; then
+            cat /tmp/nexus-upload.out
+            echo
+          fi
+
+          if [ "${http_code}" != "204" ] && [ "${http_code}" != "201" ] && [ "${http_code}" != "200" ]; then
+            echo "::error::Failed to upload artifact to Nexus raw repo '${NEXUS_RAW_REPO}' (HTTP ${http_code})"
+            exit 1
+          fi
+
+          echo "Published: ${NEXUS_URL}/repository/${NEXUS_RAW_REPO}${DIRECTORY}/$(basename "${JAR}")"
