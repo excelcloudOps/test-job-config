@@ -10,7 +10,7 @@
   <packaging>jar</packaging>
 
   <name>sample-lib</name>
-  <description>Sample library published to Nexus raw-release via GitHub Actions</description>
+  <description>Sample library published to Nexus raw-releases via GitHub Actions</description>
 
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
