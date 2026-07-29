@@ -148,24 +148,57 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Post success message to Slack
-        uses: slackapi/slack-github-action@v2.1.1
-        with:
-          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          payload: |
-            text: "Nexus publish succeeded for ${{ needs.build-and-publish.outputs.artifact_id }} ${{ needs.build-and-publish.outputs.version }}"
-            blocks:
-              - type: header
-                text:
-                  type: plain_text
-                  text: "Nexus publish succeeded"
-              - type: section
-                text:
-                  type: mrkdwn
-                  text: |
-                    *Artifact:* `${{ needs.build-and-publish.outputs.artifact_id }}:${{ needs.build-and-publish.outputs.version }}`
-                    *Repo:* `${{ github.repository }}`
-                    *Commit:* `${{ github.sha }}`
-                    *Actor:* ${{ github.actor }}
-                    *Artifact URL:* <${{ needs.build-and-publish.outputs.artifact_url }}|download>
-                    *Workflow:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|view run>
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          ARTIFACT_ID: ${{ needs.build-and-publish.outputs.artifact_id }}
+          VERSION: ${{ needs.build-and-publish.outputs.version }}
+          ARTIFACT_URL: ${{ needs.build-and-publish.outputs.artifact_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "::error::SLACK_WEBHOOK_URL secret is not set"
+            exit 1
+          fi
+
+          # Slack Workflow webhook triggers expect JSON keys that match the
+          # workflow's configured input variables.
+          payload=$(python3 - <<'PY'
+          import json, os
+          message = (
+              f"Nexus publish succeeded for {os.environ['ARTIFACT_ID']}:{os.environ['VERSION']}\n"
+              f"Repo: {os.environ['REPO']}\n"
+              f"Actor: {os.environ['ACTOR']}\n"
+              f"Commit: {os.environ['SHA']}\n"
+              f"Artifact: {os.environ['ARTIFACT_URL']}\n"
+              f"Run: {os.environ['RUN_URL']}"
+          )
+          print(json.dumps({
+              "message": message,
+              "artifact_id": os.environ["ARTIFACT_ID"],
+              "version": os.environ["VERSION"],
+              "artifact_url": os.environ["ARTIFACT_URL"],
+              "run_url": os.environ["RUN_URL"],
+              "repo": os.environ["REPO"],
+              "actor": os.environ["ACTOR"],
+              "sha": os.environ["SHA"],
+          }))
+          PY
+          )
+
+          http_code=$(curl -sS -o /tmp/slack-response.txt -w "%{http_code}" \
+            -X POST "${SLACK_WEBHOOK_URL}" \
+            -H "Content-Type: application/json" \
+            -d "${payload}")
+          echo "Slack trigger HTTP ${http_code}"
+          if [ -s /tmp/slack-response.txt ]; then
+            cat /tmp/slack-response.txt
+            echo
+          fi
+          if [ "${http_code}" != "200" ]; then
+            echo "::error::Slack notification failed (HTTP ${http_code})"
+            exit 1
+          fi

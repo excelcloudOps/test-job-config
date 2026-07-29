@@ -18,7 +18,9 @@ Already configured on this repo:
 | `NEXUS_URL` | Nexus base URL, e.g. `https://nexus.example.com` (no trailing slash needed) |
 | `NEXUS_USERNAME` | Nexus deploy user |
 | `NEXUS_PASSWORD` | Nexus deploy password / token |
-| `SLACK_WEBHOOK_URL` | Slack Incoming Webhook URL for publish success notifications |
+| `SLACK_WEBHOOK_URL` | Slack Workflow webhook trigger URL (`https://hooks.slack.com/triggers/...`) |
+
+In the Slack workflow, add an input variable named **`message`** (used for the main notification text). Optional extras also sent: `artifact_id`, `version`, `artifact_url`, `run_url`, `repo`, `actor`, `sha`.
 
 ## Optional repository variables
 
@@ -67,5 +69,6 @@ Artifacts are uploaded via the Nexus Components API to:
 
 ### Slack notification skipped or failed
 
-1. Add repo secret `SLACK_WEBHOOK_URL` from a Slack Incoming Webhook
-2. Confirm the webhook still targets the intended channel
+1. Confirm repo secret `SLACK_WEBHOOK_URL` is set to your Slack **Workflow webhook** URL (`hooks.slack.com/triggers/...`)
+2. In the Slack workflow, ensure there is an input variable named `message`
+3. Confirm the workflow posts that `message` to your channel
