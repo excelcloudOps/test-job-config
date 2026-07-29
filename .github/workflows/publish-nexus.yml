@@ -18,6 +18,10 @@ permissions:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    outputs:
+      artifact_id: ${{ steps.publish.outputs.artifact_id }}
+      version: ${{ steps.publish.outputs.version }}
+      artifact_url: ${{ steps.publish.outputs.artifact_url }}
     env:
       NEXUS_URL: ${{ secrets.NEXUS_URL }}
       NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
@@ -95,6 +99,7 @@ jobs:
         run: mvn -B -ntp clean verify
 
       - name: Publish JAR to Nexus raw-releases
+        id: publish
         if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
@@ -103,6 +108,7 @@ jobs:
           GROUP_PATH=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.groupId | tr '.' '/')
           JAR="target/${ARTIFACT_ID}-${VERSION}.jar"
           DIRECTORY="/${GROUP_PATH}/${ARTIFACT_ID}/${VERSION}"
+          ARTIFACT_URL="${NEXUS_URL}/repository/${NEXUS_RAW_REPO}${DIRECTORY}/$(basename "${JAR}")"
 
           if [ ! -f "${JAR}" ]; then
             echo "::error::Built JAR not found at ${JAR}"
@@ -128,4 +134,38 @@ jobs:
             exit 1
           fi
 
-          echo "Published: ${NEXUS_URL}/repository/${NEXUS_RAW_REPO}${DIRECTORY}/$(basename "${JAR}")"
+          echo "Published: ${ARTIFACT_URL}"
+          {
+            echo "artifact_id=${ARTIFACT_ID}"
+            echo "version=${VERSION}"
+            echo "artifact_url=${ARTIFACT_URL}"
+          } >> "$GITHUB_OUTPUT"
+
+  notify-slack:
+    name: Notify Slack
+    needs: build-and-publish
+    if: github.event_name != 'pull_request' && needs.build-and-publish.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post success message to Slack
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "Nexus publish succeeded for ${{ needs.build-and-publish.outputs.artifact_id }} ${{ needs.build-and-publish.outputs.version }}"
+            blocks:
+              - type: header
+                text:
+                  type: plain_text
+                  text: "Nexus publish succeeded"
+              - type: section
+                text:
+                  type: mrkdwn
+                  text: |
+                    *Artifact:* `${{ needs.build-and-publish.outputs.artifact_id }}:${{ needs.build-and-publish.outputs.version }}`
+                    *Repo:* `${{ github.repository }}`
+                    *Commit:* `${{ github.sha }}`
+                    *Actor:* ${{ github.actor }}
+                    *Artifact URL:* <${{ needs.build-and-publish.outputs.artifact_url }}|download>
+                    *Workflow:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|view run>
